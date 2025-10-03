@@ -21,6 +21,8 @@ import {
   Star,
   Home,
 } from "lucide-react";
+import { useStreamingText } from "./hooks/useStreamingText";
+import { StreamingTextDisplay } from "./components/StreamingTextDisplay";
 
 // --- Types ---
 interface Component {
@@ -1741,6 +1743,7 @@ const ScriptCircuitPage = () => {
   const [generatedSVG, setGeneratedSVG] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState("");
+  const { streamedText: streamedSVG, isStreaming: isStreamingSVG, streamText: streamSVG, clearText: clearSVG } = useStreamingText();
 
   // Function to copy the AI system prompt to clipboard
   const copySystemPrompt = () => {
@@ -2277,23 +2280,26 @@ ${projectDescription}`;
 
       // Get the text from the API response structure
       const aiResponseText = data.candidates?.[0]?.content?.parts?.[0]?.text || "Sorry, I received an empty or unreadable response from the API.";
-      
+
       if (aiResponseText !== "Sorry, I received an empty or unreadable response from the API.") {
         const aiResponse = aiResponseText.trim();
 
-        // Extract SVG from the response (assuming it's wrapped in ```svg ... ```)
+        let svgContent = "";
         const svgMatch = aiResponse.match(/```svg\s*([\s\S]*?)\s*```/);
         if (svgMatch && svgMatch[1]) {
-          setGeneratedSVG(svgMatch[1]);
+          svgContent = svgMatch[1];
         } else {
-          // If no SVG code block found, try to find SVG tags
           const svgTagMatch = aiResponse.match(/<svg[\s\S]*?<\/svg>/);
           if (svgTagMatch) {
-            setGeneratedSVG(svgTagMatch[0]);
+            svgContent = svgTagMatch[0];
           } else {
             setError("L'IA n'a pas généré de code SVG valide. Voici sa réponse complète : " + aiResponse);
+            return;
           }
         }
+
+        setGeneratedSVG(svgContent);
+        await streamSVG(svgContent, 5);
       } else {
         setError("❌ Erreur : Aucun SVG généré par l'IA.");
       }
@@ -2422,7 +2428,7 @@ ${projectDescription}`;
           )}
         </div>
 
-        {generatedSVG && (
+        {(generatedSVG || isStreamingSVG) && (
           <div className="glass-card rounded-3xl p-8">
             <h2 className="text-2xl font-bold text-gray-800 mb-4">Schéma du Circuit Généré</h2>
             <div className="border border-gray-300 rounded-lg p-4 bg-gray-50 overflow-auto">
@@ -2430,9 +2436,12 @@ ${projectDescription}`;
             </div>
             <div className="mt-6 p-4 bg-blue-50 rounded-lg">
               <h3 className="font-semibold text-gray-800 mb-2">Code SVG (copiez pour l'utiliser dans vos projets)</h3>
-              <pre className="bg-gray-900 text-green-400 p-4 rounded-lg overflow-x-auto text-sm leading-relaxed whitespace-pre-wrap font-mono max-h-96 overflow-y-auto">
-                {generatedSVG}
-              </pre>
+              <StreamingTextDisplay
+                text={streamedSVG}
+                isStreaming={isStreamingSVG}
+                className="bg-gray-900 text-green-400 p-4 rounded-lg overflow-x-auto text-sm leading-relaxed whitespace-pre-wrap font-mono max-h-96 overflow-y-auto"
+                autoScroll={true}
+              />
             </div>
           </div>
         )}
@@ -2478,10 +2487,11 @@ function App() {
   const [selectedComponent, setSelectedComponent] = useState<Component | null>(null);
   const [generatedCode, setGeneratedCode] = useState<string | null>(null);
   const [loadingCode, setLoadingCode] = useState(false);
+  const { streamedText: streamedCode, isStreaming: isStreamingCode, streamText: streamCode, clearText: clearCode } = useStreamingText();
 
   // --- API Constants defined inside App ---
   // ⚠️ WARNING: The API Key is exposed in this client-side code.
-  const API_KEY = "AIzaSyDE9J-NkHYMOiBbAJ_nW27frcC9h8owcIg"; 
+  const API_KEY = "AIzaSyDE9J-NkHYMOiBbAJ_nW27frcC9h8owcIg";
   const API_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${API_KEY}`;
   // ----------------------------------------
 
@@ -2490,6 +2500,7 @@ function App() {
     // 1. Set initial states
     setLoadingCode(true);
     setGeneratedCode(null);
+    clearCode();
 
     // 2. Construct the detailed prompt in French
     const systemPrompt = `
@@ -2521,6 +2532,7 @@ Le code doit être minimaliste, clair et pédagogique, avec des commentaires en 
       // Get the text from the API response structure
       const aiResponseText = data.candidates?.[0]?.content?.parts?.[0]?.text || "Sorry, I received an empty or unreadable response from the API.";
       setGeneratedCode(aiResponseText);
+      await streamCode(aiResponseText, 5);
 
     } catch (error) {
       // 7. Handle all errors (network or HTTP/content errors)
@@ -3174,6 +3186,7 @@ const HomePage = () => {
     const [customPrompt, setCustomPrompt] = useState("");
     const [customGeneratedCode, setCustomGeneratedCode] = useState<string | null>(null);
     const [loadingCustomCode, setLoadingCustomCode] = useState(false);
+    const { streamedText: streamedCustomCode, isStreaming: isStreamingCustomCode, streamText: streamCustomCode, clearText: clearCustomCode } = useStreamingText();
     // >>> NEW FEATURE: Applied Search Term (for Enter key)
     const [appliedSearchTerm, setAppliedSearchTerm] = useState("");
     // Handle Enter key press for search
@@ -3210,6 +3223,7 @@ const HomePage = () => {
       }
       setLoadingCustomCode(true);
       setCustomGeneratedCode(null);
+      clearCustomCode();
       try {
        const componentList = selectedComponentsForAI.map(comp => `${comp.name} (${comp.description})`).join("\n- ");
         const fullPrompt = `L'utilisateur a sélectionné les composants suivants :
@@ -3243,6 +3257,7 @@ Le tout doit être clair, concis et directement utilisable par un étudiant ou u
         // Get the text from the API response structure
         const aiResponseText = data.candidates?.[0]?.content?.parts?.[0]?.text || "Sorry, I received an empty or unreadable response from the API.";
         setCustomGeneratedCode(aiResponseText);
+        await streamCustomCode(aiResponseText, 5);
       } catch (error) {
         console.error("Erreur API Gemini (Custom):", error);
         setCustomGeneratedCode("❌ Échec de la connexion à l'IA. Vérifiez le réseau ou l'API key.");
@@ -3361,26 +3376,30 @@ Le tout doit être clair, concis et directement utilisable par un étudiant ou u
               )}
             </button>
             {/* >>> NEW FEATURE: Display Custom Generated Output */}
-            {customGeneratedCode && (
+            {(customGeneratedCode || isStreamingCustomCode) && (
               <div className="mt-6 p-4 glass rounded-2xl">
                 <div className="flex justify-between items-center mb-2">
                   <h4 className="font-semibold text-gray-800">Résultat de l'IA</h4>
                   <button
                     onClick={() => {
-                      navigator.clipboard.writeText(customGeneratedCode).then(
+                      navigator.clipboard.writeText(customGeneratedCode || streamedCustomCode).then(
                         () => alert("✅ Copié dans le presse-papiers !"),
                         () => alert("❌ Échec de la copie.")
                       );
                     }}
                     className="flex items-center space-x-1 text-xs bg-gray-100 hover:bg-gray-200 text-gray-700 px-3 py-1 rounded border"
+                    disabled={isStreamingCustomCode}
                   >
                     <Copy size={14} />
                     <span>Copier</span>
                   </button>
                 </div>
-                <pre className="bg-gray-900 text-green-400 p-4 rounded-lg overflow-x-auto text-sm leading-relaxed whitespace-pre-wrap font-mono">
-                  {customGeneratedCode}
-                </pre>
+                <StreamingTextDisplay
+                  text={streamedCustomCode}
+                  isStreaming={isStreamingCustomCode}
+                  className="bg-gray-900 text-green-400 p-4 rounded-lg overflow-x-auto text-sm leading-relaxed whitespace-pre-wrap font-mono"
+                  autoScroll={true}
+                />
               </div>
             )}
           </div>
@@ -3492,26 +3511,30 @@ Le tout doit être clair, concis et directement utilisable par un étudiant ou u
                         <span>Génération du code...</span>
                       </p>
                     )}
-                    {generatedCode && (
+                    {(generatedCode || isStreamingCode) && (
                       <div className="mt-4">
                         <div className="flex justify-between items-center mb-2">
                           <h3 className="font-semibold text-gray-800">Code Généré</h3>
                           <button
                             onClick={() => {
-                              navigator.clipboard.writeText(generatedCode).then(
+                              navigator.clipboard.writeText(generatedCode || streamedCode).then(
                                 () => alert("✅ Code copié dans le presse-papiers !"),
                                 () => alert("❌ Échec de la copie.")
                               );
                             }}
                             className="flex items-center space-x-1 text-xs bg-gray-100 hover:bg-gray-200 text-gray-700 px-3 py-1 rounded border"
+                            disabled={isStreamingCode}
                           >
                             <Copy size={14} />
                             <span>Copier</span>
                           </button>
                         </div>
-                        <pre className="bg-gray-900 text-green-400 p-4 rounded-lg overflow-x-auto text-sm leading-relaxed whitespace-pre-wrap font-mono">
-                          {generatedCode}
-                        </pre>
+                        <StreamingTextDisplay
+                          text={streamedCode}
+                          isStreaming={isStreamingCode}
+                          className="bg-gray-900 text-green-400 p-4 rounded-lg overflow-x-auto text-sm leading-relaxed whitespace-pre-wrap font-mono"
+                          autoScroll={true}
+                        />
                       </div>
                     )}
                   </div>
