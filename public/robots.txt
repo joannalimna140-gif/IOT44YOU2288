@@ -1,0 +1,3 @@
+User-agent: *
+Allow: /
+Sitemap: https://iot4you2.vercel.app/sitemap.xml
