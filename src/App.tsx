@@ -21,9 +21,10 @@ import {
   Star,
   Home,
 } from "lucide-react";
-import { useStreamingText } from "./hooks/useStreamingText";
-import { StreamingTextDisplay } from "./components/StreamingTextDisplay";
-import { streamGeminiResponse } from "./utils/geminiStreaming";
+import { useGenerationProgress } from "./hooks/useGenerationProgress";
+import { PercentageLoader } from "./components/PercentageLoader";
+import { ApiKeySettings, getStoredApiKey } from "./components/ApiKeySettings";
+import { generateWithProgress } from "./utils/geminiWithProgress";
 
 // --- Types ---
 interface Component {
@@ -1741,10 +1742,16 @@ const HomeButton: React.FC<HomeButtonProps> = ({ onClick }) => (
 // --- Script Circuit Page ---
 const ScriptCircuitPage = () => {
   const [projectDescription, setProjectDescription] = useState("");
-  const [generatedSVG, setGeneratedSVG] = useState("");
-  const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState("");
-  const { streamedText: streamedSVG, isStreaming: isStreamingSVG, streamText: streamSVG, clearText: clearSVG, appendText: appendSVG, startStreaming: startStreamingSVG, stopStreaming: stopStreamingSVG } = useStreamingText();
+  const {
+    percentage: svgPercentage,
+    isGenerating: isGeneratingSVG,
+    generatedContent: generatedSVG,
+    startGeneration: startSVGGeneration,
+    updateProgress: updateSVGProgress,
+    completeGeneration: completeSVGGeneration,
+    reset: resetSVGGeneration
+  } = useGenerationProgress();
 
   // Function to copy the AI system prompt to clipboard
   const copySystemPrompt = () => {
@@ -2011,10 +2018,8 @@ ${projectDescription}`;
       return;
     }
 
-    setIsLoading(true);
-    setGeneratedSVG("");
+    startSVGGeneration();
     setError("");
-    startStreamingSVG();
 
     try {
       // This entire block is a STRING sent to the AI. The code examples within it are NOT executed by JavaScript.
@@ -2261,16 +2266,13 @@ ESP32 DevKit V1:
 **NO EXTRA TEXT - JUST THE SVG file
 ${projectDescription}`;
 
-      let fullResponse = '';
-
-      await streamGeminiResponse(
-        "AIzaSyAg9vO1uRjzQxuIdVJcW-13-GL8AKVhl6I",
+      await generateWithProgress(
+        getActiveApiKey(),
         systemPrompt,
-        (chunk) => {
-          fullResponse += chunk;
-          appendSVG(chunk);
+        (percentage) => {
+          updateSVGProgress(percentage);
         },
-        () => {
+        (fullResponse) => {
           const aiResponse = fullResponse.trim();
 
           let svgContent = "";
@@ -2283,28 +2285,23 @@ ${projectDescription}`;
               svgContent = svgTagMatch[0];
             } else {
               setError("L'IA n'a pas généré de code SVG valide. Voici sa réponse complète : " + aiResponse);
-              stopStreamingSVG();
-              setIsLoading(false);
+              completeSVGGeneration("");
               return;
             }
           }
 
-          setGeneratedSVG(svgContent);
-          stopStreamingSVG();
-          setIsLoading(false);
+          completeSVGGeneration(svgContent);
         },
         (error) => {
           console.error("Erreur API Gemini:", error);
           setError("❌ Échec de la connexion à l'IA. Vérifiez le réseau ou l'API key.");
-          stopStreamingSVG();
-          setIsLoading(false);
+          completeSVGGeneration("");
         }
       );
     } catch (error) {
       console.error("Erreur API Gemini:", error);
       setError("❌ Échec de la connexion à l'IA. Vérifiez le réseau ou l'API key.");
-      stopStreamingSVG();
-      setIsLoading(false);
+      completeSVGGeneration("");
     }
   };
 
@@ -2425,7 +2422,16 @@ ${projectDescription}`;
           )}
         </div>
 
-        {(generatedSVG || isStreamingSVG) && (
+        {isGeneratingSVG && (
+          <div className="glass-card rounded-3xl p-8">
+            <PercentageLoader
+              percentage={svgPercentage}
+              message="Génération du schéma de circuit en cours..."
+            />
+          </div>
+        )}
+
+        {generatedSVG && !isGeneratingSVG && (
           <div className="glass-card rounded-3xl p-8">
             <h2 className="text-2xl font-bold text-gray-800 mb-4">Schéma du Circuit Généré</h2>
             <div className="border border-gray-300 rounded-lg p-4 bg-gray-50 overflow-auto">
@@ -2433,12 +2439,9 @@ ${projectDescription}`;
             </div>
             <div className="mt-6 p-4 bg-blue-50 rounded-lg">
               <h3 className="font-semibold text-gray-800 mb-2">Code SVG (copiez pour l'utiliser dans vos projets)</h3>
-              <StreamingTextDisplay
-                text={streamedSVG}
-                isStreaming={isStreamingSVG}
-                className="bg-gray-900 text-green-400 p-4 rounded-lg overflow-x-auto text-sm leading-relaxed whitespace-pre-wrap font-mono max-h-96 overflow-y-auto"
-                autoScroll={true}
-              />
+              <div className="bg-gray-900 text-green-400 p-4 rounded-lg overflow-x-auto text-sm leading-relaxed whitespace-pre-wrap font-mono max-h-96 overflow-y-auto">
+                {generatedSVG}
+              </div>
             </div>
           </div>
         )}
@@ -2482,24 +2485,32 @@ function App() {
   const [searchTerm, setSearchTerm] = useState("");
   const [filterOpen, setFilterOpen] = useState(false);
   const [selectedComponent, setSelectedComponent] = useState<Component | null>(null);
-  const [generatedCode, setGeneratedCode] = useState<string | null>(null);
-  const [loadingCode, setLoadingCode] = useState(false);
-  const { streamedText: streamedCode, isStreaming: isStreamingCode, streamText: streamCode, clearText: clearCode, appendText: appendCode, startStreaming: startStreamingCode, stopStreaming: stopStreamingCode } = useStreamingText();
+  const [userApiKey, setUserApiKey] = useState<string>("");
+  const {
+    percentage: codePercentage,
+    isGenerating: isGeneratingCode,
+    generatedContent: generatedCode,
+    startGeneration: startCodeGeneration,
+    updateProgress: updateCodeProgress,
+    completeGeneration: completeCodeGeneration,
+    reset: resetCodeGeneration
+  } = useGenerationProgress();
 
-  // --- API Constants defined inside App ---
-  // ⚠️ WARNING: The API Key is exposed in this client-side code.
-  const API_KEY = "AIzaSyDE9J-NkHYMOiBbAJ_nW27frcC9h8owcIg";
-  const API_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${API_KEY}`;
-  // ----------------------------------------
+  const DEFAULT_API_KEY = "AIzaSyDE9J-NkHYMOiBbAJ_nW27frcC9h8owcIg";
+
+  useEffect(() => {
+    const storedKey = getStoredApiKey();
+    if (storedKey) {
+      setUserApiKey(storedKey);
+    }
+  }, []);
+
+  const getActiveApiKey = () => userApiKey || DEFAULT_API_KEY;
 
   // 🔥 Gemini API Call to Generate Arduino Code
   const generateCode = async (component: Component) => {
-    // 1. Set initial states
-    setLoadingCode(true);
-    setGeneratedCode(null);
-    startStreamingCode();
+    startCodeGeneration();
 
-    // 2. Construct the detailed prompt in French
     const systemPrompt = `
 Génère une explication simple et détaillée du fonctionnement du composant suivant :
 ${component.name} (${component.description}).
@@ -2508,27 +2519,20 @@ Ensuite, propose un petit code d'exemple en Arduino C++ montrant comment utilise
 Le code doit être minimaliste, clair et pédagogique, avec des commentaires en français expliquant chaque étape (initialisation, configuration, boucle, etc.).
 `;
 
-    let fullResponse = '';
-
-    await streamGeminiResponse(
-      API_KEY,
+    await generateWithProgress(
+      getActiveApiKey(),
       systemPrompt,
-      (chunk) => {
-        fullResponse += chunk;
-        appendCode(chunk);
+      (percentage) => {
+        updateCodeProgress(percentage);
       },
-      () => {
-        setGeneratedCode(fullResponse);
-        stopStreamingCode();
-        setLoadingCode(false);
+      (content) => {
+        completeCodeGeneration(content);
       },
       (error) => {
         console.error("Erreur API Gemini:", error);
         const errorMessage = `❌ Échec de la connexion ou erreur API. Détails: ${error.message}`;
-        setGeneratedCode(errorMessage);
-        appendCode(errorMessage);
-        stopStreamingCode();
-        setLoadingCode(false);
+        completeCodeGeneration(errorMessage);
+        updateCodeProgress(0);
       }
     );
   };
@@ -2602,7 +2606,7 @@ const HomePage = () => {
               <Cpu className="text-blue-600" size={32} />
               <span className="text-2xl font-bold text-gray-800">IOT4YOU2</span>
             </div>
-            <div className="hidden md:flex space-x-8">
+            <div className="hidden md:flex items-center space-x-8">
               <button
                 className="text-gray-600 hover:text-blue-600 transition-colors"
                 onClick={() => setCurrentPage("home")}
@@ -2633,6 +2637,7 @@ const HomePage = () => {
               >
                 Schéma Circuit
               </button>
+              <ApiKeySettings onApiKeyChange={setUserApiKey} />
             </div>
           </div>
         </div>
@@ -3171,9 +3176,15 @@ const HomePage = () => {
       return [];
     });
     const [customPrompt, setCustomPrompt] = useState("");
-    const [customGeneratedCode, setCustomGeneratedCode] = useState<string | null>(null);
-    const [loadingCustomCode, setLoadingCustomCode] = useState(false);
-    const { streamedText: streamedCustomCode, isStreaming: isStreamingCustomCode, streamText: streamCustomCode, clearText: clearCustomCode, appendText: appendCustomCode, startStreaming: startStreamingCustomCode, stopStreaming: stopStreamingCustomCode } = useStreamingText();
+    const {
+      percentage: customCodePercentage,
+      isGenerating: isGeneratingCustomCode,
+      generatedContent: customGeneratedCode,
+      startGeneration: startCustomCodeGeneration,
+      updateProgress: updateCustomCodeProgress,
+      completeGeneration: completeCustomCodeGeneration,
+      reset: resetCustomCodeGeneration
+    } = useGenerationProgress();
     const [localSearchTerm, setLocalSearchTerm] = useState("");
     const [appliedSearchTerm, setAppliedSearchTerm] = useState("");
     const handleSearchKeyPress = (e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -3207,9 +3218,7 @@ const HomePage = () => {
         alert("Veuillez entrer une description de votre projet.");
         return;
       }
-      setLoadingCustomCode(true);
-      setCustomGeneratedCode(null);
-      startStreamingCustomCode();
+      startCustomCodeGeneration();
 
       const componentList = selectedComponentsForAI.map(comp => `${comp.name} (${comp.description})`).join("\n- ");
       const fullPrompt = `L'utilisateur a sélectionné les composants suivants :
@@ -3223,27 +3232,19 @@ Génère une réponse complète, pédagogique et utile. Cela peut être :
 - Des conseils d'utilisation.
 Le tout doit être clair, concis et directement utilisable par un étudiant ou un débutant.`;
 
-      let fullResponse = '';
-
-      await streamGeminiResponse(
-        "AIzaSyAg9vO1uRjzQxuIdVJcW-13-GL8AKVhl6I",
+      await generateWithProgress(
+        getActiveApiKey(),
         fullPrompt,
-        (chunk) => {
-          fullResponse += chunk;
-          appendCustomCode(chunk);
+        (percentage) => {
+          updateCustomCodeProgress(percentage);
         },
-        () => {
-          setCustomGeneratedCode(fullResponse);
-          stopStreamingCustomCode();
-          setLoadingCustomCode(false);
+        (content) => {
+          completeCustomCodeGeneration(content);
         },
         (error) => {
           console.error("Erreur API Gemini (Custom):", error);
           const errorMessage = "❌ Échec de la connexion à l'IA. Vérifiez le réseau ou l'API key.";
-          setCustomGeneratedCode(errorMessage);
-          appendCustomCode(errorMessage);
-          stopStreamingCustomCode();
-          setLoadingCustomCode(false);
+          completeCustomCodeGeneration(errorMessage);
         }
       );
     };
@@ -3251,7 +3252,7 @@ Le tout doit être clair, concis et directement utilisable par un étudiant ou u
     const clearSelection = () => {
       setSelectedComponentsForAI([]);
       setCustomPrompt("");
-      setCustomGeneratedCode(null);
+      resetCustomCodeGeneration();
     };
     // >>> NEW FEATURE: Filter components using the applied search term (on Enter)
     const filteredComponents = iotComponents.filter((component) =>
@@ -3357,31 +3358,35 @@ Le tout doit être clair, concis et directement utilisable par un étudiant ou u
                 </>
               )}
             </button>
-            {/* >>> NEW FEATURE: Display Custom Generated Output */}
-            {(customGeneratedCode || isStreamingCustomCode) && (
+            {isGeneratingCustomCode && (
+              <div className="mt-6 p-4 glass rounded-2xl">
+                <PercentageLoader
+                  percentage={customCodePercentage}
+                  message="Génération de votre projet personnalisé..."
+                />
+              </div>
+            )}
+
+            {customGeneratedCode && !isGeneratingCustomCode && (
               <div className="mt-6 p-4 glass rounded-2xl">
                 <div className="flex justify-between items-center mb-2">
                   <h4 className="font-semibold text-gray-800">Résultat de l'IA</h4>
                   <button
                     onClick={() => {
-                      navigator.clipboard.writeText(customGeneratedCode || streamedCustomCode).then(
+                      navigator.clipboard.writeText(customGeneratedCode).then(
                         () => alert("✅ Copié dans le presse-papiers !"),
                         () => alert("❌ Échec de la copie.")
                       );
                     }}
                     className="flex items-center space-x-1 text-xs bg-gray-100 hover:bg-gray-200 text-gray-700 px-3 py-1 rounded border"
-                    disabled={isStreamingCustomCode}
                   >
                     <Copy size={14} />
                     <span>Copier</span>
                   </button>
                 </div>
-                <StreamingTextDisplay
-                  text={streamedCustomCode}
-                  isStreaming={isStreamingCustomCode}
-                  className="bg-gray-900 text-green-400 p-4 rounded-lg overflow-x-auto text-sm leading-relaxed whitespace-pre-wrap font-mono"
-                  autoScroll={true}
-                />
+                <div className="bg-gray-900 text-green-400 p-4 rounded-lg overflow-x-auto text-sm leading-relaxed whitespace-pre-wrap font-mono">
+                  {customGeneratedCode}
+                </div>
               </div>
             )}
           </div>
@@ -3487,36 +3492,34 @@ Le tout doit être clair, concis et directement utilisable par un étudiant ou u
                       <Zap size={16} />
                       <span>Générer le code</span>
                     </button>
-                    {loadingCode && (
-                      <p className="text-blue-600 mt-2 flex items-center space-x-2">
-                        <Zap className="animate-spin" size={16} />
-                        <span>Génération du code...</span>
-                      </p>
+                    {isGeneratingCode && (
+                      <div className="mt-4">
+                        <PercentageLoader
+                          percentage={codePercentage}
+                          message="Génération du code en cours..."
+                        />
+                      </div>
                     )}
-                    {(generatedCode || isStreamingCode) && (
+                    {generatedCode && !isGeneratingCode && (
                       <div className="mt-4">
                         <div className="flex justify-between items-center mb-2">
                           <h3 className="font-semibold text-gray-800">Code Généré</h3>
                           <button
                             onClick={() => {
-                              navigator.clipboard.writeText(generatedCode || streamedCode).then(
+                              navigator.clipboard.writeText(generatedCode).then(
                                 () => alert("✅ Code copié dans le presse-papiers !"),
                                 () => alert("❌ Échec de la copie.")
                               );
                             }}
                             className="flex items-center space-x-1 text-xs bg-gray-100 hover:bg-gray-200 text-gray-700 px-3 py-1 rounded border"
-                            disabled={isStreamingCode}
                           >
                             <Copy size={14} />
                             <span>Copier</span>
                           </button>
                         </div>
-                        <StreamingTextDisplay
-                          text={streamedCode}
-                          isStreaming={isStreamingCode}
-                          className="bg-gray-900 text-green-400 p-4 rounded-lg overflow-x-auto text-sm leading-relaxed whitespace-pre-wrap font-mono"
-                          autoScroll={true}
-                        />
+                        <div className="bg-gray-900 text-green-400 p-4 rounded-lg overflow-x-auto text-sm leading-relaxed whitespace-pre-wrap font-mono">
+                          {generatedCode}
+                        </div>
                       </div>
                     )}
                   </div>
