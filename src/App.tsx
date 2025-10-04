@@ -3174,12 +3174,11 @@ const HomePage = () => {
     const [customGeneratedCode, setCustomGeneratedCode] = useState<string | null>(null);
     const [loadingCustomCode, setLoadingCustomCode] = useState(false);
     const { streamedText: streamedCustomCode, isStreaming: isStreamingCustomCode, streamText: streamCustomCode, clearText: clearCustomCode, appendText: appendCustomCode, startStreaming: startStreamingCustomCode, stopStreaming: stopStreamingCustomCode } = useStreamingText();
-    // >>> NEW FEATURE: Applied Search Term (for Enter key)
+    const [localSearchTerm, setLocalSearchTerm] = useState("");
     const [appliedSearchTerm, setAppliedSearchTerm] = useState("");
-    // Handle Enter key press for search
     const handleSearchKeyPress = (e: React.KeyboardEvent<HTMLInputElement>) => {
       if (e.key === "Enter") {
-        setAppliedSearchTerm(searchTerm); // Apply the search only on Enter
+        setAppliedSearchTerm(localSearchTerm);
         e.preventDefault();
       }
     };
@@ -3279,10 +3278,10 @@ Le tout doit être clair, concis et directement utilisable par un étudiant ou u
               <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" size={20} />
               <input
                 type="text"
-                placeholder="Rechercher un composant..."
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                onKeyPress={handleSearchKeyPress} // <-- NEW: Trigger search on Enter
+                placeholder="Rechercher un composant... (Appuyez sur Entrée pour rechercher)"
+                value={localSearchTerm}
+                onChange={(e) => setLocalSearchTerm(e.target.value)}
+                onKeyDown={handleSearchKeyPress}
                 className="glass-input w-full pl-10 pr-4 py-3 rounded-2xl"
               />
             </div>
